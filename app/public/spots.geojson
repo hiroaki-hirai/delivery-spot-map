@@ -1,0 +1,41 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "待機スポットA",
+        "category": "wait",
+        "memo": "昼ピークに鳴りやすい。駐車しやすい。"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [132.743, 34.426]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "裏道メモB",
+        "category": "shortcut",
+        "memo": "信号が少ない抜け道（雨の日は滑りやすいかも）。"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [132.750, 34.421]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "title": "注意ポイントC",
+        "category": "danger",
+        "memo": "路肩が狭い。右折待ちが詰まりやすい。"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [132.735, 34.418]
+      }
+    }
+  ]
+}
