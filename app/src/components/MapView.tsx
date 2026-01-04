@@ -1,32 +1,41 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  useMapEvents,
+} from "react-leaflet";
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import {
   addSpot,
+  addSpotsBulk,
   geojsonToSpots,
   getAllSpots,
   isSeeded,
   setSeeded,
-  type Spot,
 } from "@/lib/spotsDb";
-import type { FeatureCollection } from "geojson";
+import type { Spot, SpotCategory } from "@/lib/spotsDb";
 
-// eslint が気になるなら next line で逃がすのもOK
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 delete (L.Icon.Default.prototype as any)._getIconUrl;
-
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconRetinaUrl:
+    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-function MapRightClickAdd({ onPick }: { onPick: (lat: number, lng: number) => void }) {
+function MapRightClickAdd({
+  onPick,
+}: {
+  onPick: (lat: number, lng: number) => void;
+}) {
   useMapEvents({
     contextmenu(e) {
       onPick(e.latlng.lat, e.latlng.lng);
@@ -38,33 +47,46 @@ function MapRightClickAdd({ onPick }: { onPick: (lat: number, lng: number) => vo
 export default function MapView() {
   const center: LatLngExpression = [34.426, 132.743];
 
-  // ✅ Spot[] に統一
   const [spots, setSpots] = useState<Spot[]>([]);
   const [draft, setDraft] = useState<{
     lat: number;
     lng: number;
     title: string;
     memo: string;
-    category: Spot["category"];
+    category: SpotCategory;
   } | null>(null);
 
+  // 1) 起動時に DB を読む → 空なら GeoJSON を seed → 最後に DB を読む（DBを正）
   useEffect(() => {
     (async () => {
-      // 初回seed（必要なら）
-      if (!(await isSeeded())) {
+      // まずDBを読む
+      const dbSpots = await getAllSpots();
+      if (dbSpots.length > 0) {
+        setSpots(dbSpots);
+        return;
+      }
+
+      // 空なら seed（ただし一度だけにしたいなら seeded フラグも使う）
+      const seeded = await isSeeded();
+      if (!seeded) {
         const res = await fetch("/spots.geojson");
-        const data = (await res.json()) as FeatureCollection; // any回避
-        const seedSpots = geojsonToSpots(data);
-        // まとめて保存したいなら spotsDb 側に bulk を用意するのが理想
-        for (const s of seedSpots) await addSpot(s);
+        const geo = await res.json(); // geojsonToSpots 側で型寄せする前提
+        const initialSpots = geojsonToSpots(geo);
+        if (initialSpots.length > 0) {
+          await addSpotsBulk(initialSpots);
+        }
         await setSeeded(true);
       }
-      setSpots(await getAllSpots());
+
+      // 最後にDBを読み直して stateへ
+      const after = await getAllSpots();
+      setSpots(after);
     })();
   }, []);
 
   const allSpots = useMemo(() => spots, [spots]);
 
+  // 2) 追加もDBへ保存 → 保存後に state を更新（DBを正）
   const saveDraft = async () => {
     if (!draft) return;
 
@@ -79,7 +101,11 @@ export default function MapView() {
     };
 
     await addSpot(newSpot);
-    setSpots((prev) => [newSpot, ...prev]); // ✅ Spot に Spot を追加
+
+    // stateだけ更新してもOKだが、DBを正にするなら読み直しが確実
+    const after = await getAllSpots();
+    setSpots(after);
+
     setDraft(null);
   };
 
@@ -91,11 +117,20 @@ export default function MapView() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
+        {/* 右クリックで追加地点を選ぶ */}
         <MapRightClickAdd
-          onPick={(lat, lng) => setDraft({ lat, lng, title: "", memo: "", category: "wait" })}
+          onPick={(lat, lng) => {
+            setDraft({
+              lat,
+              lng,
+              title: "",
+              memo: "",
+              category: "wait",
+            });
+          }}
         />
 
-        {/* ✅ Spot[] 描画 */}
+        {/* 既存スポット表示（Spot[]） */}
         {allSpots.map((s) => (
           <Marker key={s.id} position={[s.lat, s.lng]}>
             <Popup>
@@ -106,7 +141,7 @@ export default function MapView() {
           </Marker>
         ))}
 
-        {/* draft マーカー */}
+        {/* 追加中（draft）マーカー */}
         {draft && (
           <Marker position={[draft.lat, draft.lng]}>
             <Popup autoClose={false} closeOnClick={false}>
@@ -118,7 +153,10 @@ export default function MapView() {
                   <input
                     style={{ width: "100%" }}
                     value={draft.title}
-                    onChange={(e) => setDraft((d) => (d ? { ...d, title: e.target.value } : d))}
+                    onChange={(e) =>
+                      setDraft((d) => (d ? { ...d, title: e.target.value } : d))
+                    }
+                    placeholder="例）待機スポット（西条）"
                   />
                 </label>
 
@@ -128,7 +166,9 @@ export default function MapView() {
                     style={{ width: "100%" }}
                     value={draft.category}
                     onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, category: e.target.value as Spot["category"] } : d))
+                      setDraft((d) =>
+                        d ? { ...d, category: e.target.value as SpotCategory } : d
+                      )
                     }
                   >
                     <option value="wait">wait（待機）</option>
@@ -143,7 +183,10 @@ export default function MapView() {
                     style={{ width: "100%" }}
                     rows={3}
                     value={draft.memo}
-                    onChange={(e) => setDraft((d) => (d ? { ...d, memo: e.target.value } : d))}
+                    onChange={(e) =>
+                      setDraft((d) => (d ? { ...d, memo: e.target.value } : d))
+                    }
+                    placeholder="例）昼ピークに鳴りやすい、駐車OK"
                   />
                 </label>
 
