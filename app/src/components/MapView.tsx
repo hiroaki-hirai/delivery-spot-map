@@ -22,6 +22,8 @@ import {
 } from "@/lib/spotsDb";
 import type { Spot, SpotCategory } from "@/lib/spotsDb";
 
+import { iconByCategory } from "@/components/map/icons";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -132,7 +134,11 @@ export default function MapView() {
 
         {/* 既存スポット表示（Spot[]） */}
         {allSpots.map((s) => (
-          <Marker key={s.id} position={[s.lat, s.lng]}>
+            <Marker
+              key={s.id}
+              position={[s.lat, s.lng]}
+              icon={iconByCategory[s.category ?? "wait"]}
+            >
             <Popup>
               <div style={{ fontWeight: 700 }}>{s.title}</div>
               <div style={{ opacity: 0.8 }}>カテゴリ: {s.category ?? "-"}</div>
@@ -143,7 +149,10 @@ export default function MapView() {
 
         {/* 追加中（draft）マーカー */}
         {draft && (
-          <Marker position={[draft.lat, draft.lng]}>
+            <Marker
+              position={[draft.lat, draft.lng]}
+              icon={iconByCategory[draft.category ?? "wait"]}
+            >
             <Popup autoClose={false} closeOnClick={false}>
               <div style={{ display: "grid", gap: 8, width: 260 }}>
                 <div style={{ fontWeight: 700 }}>スポット追加</div>
