@@ -1,5 +1,6 @@
-import MapView from "@/components/MapView";
+import ClientMap from "@/components/ClientMap";
 
-export default function Page() {
-  return <MapView />;
+export default function Home() {
+  return <ClientMap />;
 }
+
