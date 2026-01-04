@@ -1,4 +1,5 @@
 import { openDB, type DBSchema } from "idb";
+import type { FeatureCollection } from "geojson";
 
 export type SpotCategory = "wait" | "shortcut" | "danger";
 
@@ -71,8 +72,8 @@ export async function setSeeded(value: boolean): Promise<void> {
 }
 
 // GeoJSON → Spot[] に変換（Pointのみ）
-export function geojsonToSpots(data: any): Spot[] {
-  const features = data?.features ?? [];
+export function geojsonToSpots(data: FeatureCollection): Spot[] {
+  const features = data.features ?? [];
   return features
     .filter((f: any) => f?.geometry?.type === "Point")
     .map((f: any, i: number) => {

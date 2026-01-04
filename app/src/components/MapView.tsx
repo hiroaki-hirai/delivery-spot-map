@@ -1,57 +1,34 @@
 "use client";
 
-
 import { useEffect, useMemo, useState } from "react";
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  useMapEvents,
-} from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
+import type { LatLngExpression } from "leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
 import {
   addSpot,
-  addSpotsBulk,
   geojsonToSpots,
   getAllSpots,
   isSeeded,
   setSeeded,
   type Spot,
 } from "@/lib/spotsDb";
-import type { LatLngExpression } from "leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import type { FeatureCollection } from "geojson";
 
-
+// eslint が気になるなら next line で逃がすのもOK
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 delete (L.Icon.Default.prototype as any)._getIconUrl;
+
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-type Feature = {
-  type: "Feature";
-  properties: {
-    title?: string;
-    category?: "wait" | "shortcut" | "danger";
-    memo?: string;
-    createdAt?: string;
-  };
-  geometry: { type: "Point"; coordinates: [number, number] }; // [lng, lat]
-};
-
-type FeatureCollection = { type: "FeatureCollection"; features: Feature[] };
-
-function MapRightClickAdd({
-  onPick,
-}: {
-  onPick: (lat: number, lng: number) => void;
-}) {
+function MapRightClickAdd({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   useMapEvents({
     contextmenu(e) {
-      // 右クリック（スマホだと長押し相当になることも）
       onPick(e.latlng.lat, e.latlng.lng);
     },
   });
@@ -61,59 +38,48 @@ function MapRightClickAdd({
 export default function MapView() {
   const center: LatLngExpression = [34.426, 132.743];
 
+  // ✅ Spot[] に統一
   const [spots, setSpots] = useState<Spot[]>([]);
   const [draft, setDraft] = useState<{
     lat: number;
     lng: number;
     title: string;
     memo: string;
-    category: "wait" | "shortcut" | "danger";
+    category: Spot["category"];
   } | null>(null);
 
   useEffect(() => {
-  (async () => {
-    // 1) IndexedDBから読む
-    const saved = await getAllSpots();
-
-    // 2) まだ空なら、初回だけGeoJSONを取り込む
-    if (saved.length === 0) {
-      const seeded = await isSeeded();
-      if (!seeded) {
+    (async () => {
+      // 初回seed（必要なら）
+      if (!(await isSeeded())) {
         const res = await fetch("/spots.geojson");
-        const geo = await res.json();
-        const initial = geojsonToSpots(geo);
-        await addSpotsBulk(initial);
+        const data = (await res.json()) as FeatureCollection; // any回避
+        const seedSpots = geojsonToSpots(data);
+        // まとめて保存したいなら spotsDb 側に bulk を用意するのが理想
+        for (const s of seedSpots) await addSpot(s);
         await setSeeded(true);
-        setSpots(initial);
-        return;
       }
-    }
-
-    setSpots(saved);
-  })();
+      setSpots(await getAllSpots());
+    })();
   }, []);
-
 
   const allSpots = useMemo(() => spots, [spots]);
 
-  const saveDraft = () => {
+  const saveDraft = async () => {
     if (!draft) return;
 
-    const newFeature: Feature = {
-      type: "Feature",
-      properties: {
-        title: draft.title || "新規スポット",
-        memo: draft.memo,
-        category: draft.category,
-        createdAt: new Date().toISOString(),
-      },
-      geometry: {
-        type: "Point",
-        coordinates: [draft.lng, draft.lat], // GeoJSONは [lng, lat]
-      },
+    const newSpot: Spot = {
+      id: crypto.randomUUID(),
+      title: draft.title || "新規スポット",
+      memo: draft.memo || "",
+      category: draft.category,
+      lat: draft.lat,
+      lng: draft.lng,
+      createdAt: new Date().toISOString(),
     };
 
-    setSpots((prev) => [newFeature, ...prev]);
+    await addSpot(newSpot);
+    setSpots((prev) => [newSpot, ...prev]); // ✅ Spot に Spot を追加
     setDraft(null);
   };
 
@@ -125,36 +91,22 @@ export default function MapView() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {/* 右クリックで追加地点を選ぶ */}
         <MapRightClickAdd
-          onPick={(lat, lng) => {
-            setDraft({
-              lat,
-              lng,
-              title: "",
-              memo: "",
-              category: "wait",
-            });
-          }}
+          onPick={(lat, lng) => setDraft({ lat, lng, title: "", memo: "", category: "wait" })}
         />
 
-        {/* 既存スポット表示 */}
-        {allSpots.map((f, idx) => {
-          const [lng, lat] = f.geometry.coordinates;
-          return (
-            <Marker key={idx} position={[lat, lng]}>
-              <Popup>
-                <div style={{ fontWeight: 700 }}>{f.properties.title}</div>
-                <div style={{ opacity: 0.8 }}>
-                  カテゴリ: {f.properties.category ?? "-"}
-                </div>
-                <div>{f.properties.memo ?? ""}</div>
-              </Popup>
-            </Marker>
-          );
-        })}
+        {/* ✅ Spot[] 描画 */}
+        {allSpots.map((s) => (
+          <Marker key={s.id} position={[s.lat, s.lng]}>
+            <Popup>
+              <div style={{ fontWeight: 700 }}>{s.title}</div>
+              <div style={{ opacity: 0.8 }}>カテゴリ: {s.category ?? "-"}</div>
+              <div>{s.memo ?? ""}</div>
+            </Popup>
+          </Marker>
+        ))}
 
-        {/* 追加中（draft）マーカー */}
+        {/* draft マーカー */}
         {draft && (
           <Marker position={[draft.lat, draft.lng]}>
             <Popup autoClose={false} closeOnClick={false}>
@@ -166,10 +118,7 @@ export default function MapView() {
                   <input
                     style={{ width: "100%" }}
                     value={draft.title}
-                    onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, title: e.target.value } : d))
-                    }
-                    placeholder="例）待機スポット（西条）"
+                    onChange={(e) => setDraft((d) => (d ? { ...d, title: e.target.value } : d))}
                   />
                 </label>
 
@@ -179,14 +128,7 @@ export default function MapView() {
                     style={{ width: "100%" }}
                     value={draft.category}
                     onChange={(e) =>
-                      setDraft((d) =>
-                        d
-                          ? {
-                              ...d,
-                              category: e.target.value as any,
-                            }
-                          : d
-                      )
+                      setDraft((d) => (d ? { ...d, category: e.target.value as Spot["category"] } : d))
                     }
                   >
                     <option value="wait">wait（待機）</option>
@@ -201,10 +143,7 @@ export default function MapView() {
                     style={{ width: "100%" }}
                     rows={3}
                     value={draft.memo}
-                    onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, memo: e.target.value } : d))
-                    }
-                    placeholder="例）昼ピークに鳴りやすい、駐車OK"
+                    onChange={(e) => setDraft((d) => (d ? { ...d, memo: e.target.value } : d))}
                   />
                 </label>
 
@@ -212,10 +151,7 @@ export default function MapView() {
                   <button onClick={saveDraft} style={{ flex: 1 }}>
                     保存
                   </button>
-                  <button
-                    onClick={() => setDraft(null)}
-                    style={{ flex: 1 }}
-                  >
+                  <button onClick={() => setDraft(null)} style={{ flex: 1 }}>
                     キャンセル
                   </button>
                 </div>
