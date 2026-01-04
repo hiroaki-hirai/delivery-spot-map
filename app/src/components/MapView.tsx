@@ -9,12 +9,18 @@ import {
   Popup,
   useMapEvents,
 } from "react-leaflet";
+import {
+  addSpot,
+  addSpotsBulk,
+  geojsonToSpots,
+  getAllSpots,
+  isSeeded,
+  setSeeded,
+  type Spot,
+} from "@/lib/spotsDb";
 import type { LatLngExpression } from "leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { Feature, FeatureCollection, Point } from "geojson";
-
-
 
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -25,21 +31,18 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-type SpotCategory = "wait" | "shortcut" | "danger";
-
-type SpotProps = {
-  title: string;
-  memo: string;
-  category: SpotCategory;
-  createdAt: string;
+type Feature = {
+  type: "Feature";
+  properties: {
+    title?: string;
+    category?: "wait" | "shortcut" | "danger";
+    memo?: string;
+    createdAt?: string;
+  };
+  geometry: { type: "Point"; coordinates: [number, number] }; // [lng, lat]
 };
 
-type SpotFeature = Feature<Point, SpotProps>;
-type SpotFeatureCollection = FeatureCollection<Point, SpotProps>;
-
-
-
-
+type FeatureCollection = { type: "FeatureCollection"; features: Feature[] };
 
 function MapRightClickAdd({
   onPick,
@@ -55,12 +58,10 @@ function MapRightClickAdd({
   return null;
 }
 
-
-
 export default function MapView() {
   const center: LatLngExpression = [34.426, 132.743];
 
-  const [spots, setSpots] = useState<SpotFeature[]>([]);
+  const [spots, setSpots] = useState<Spot[]>([]);
   const [draft, setDraft] = useState<{
     lat: number;
     lng: number;
@@ -70,34 +71,49 @@ export default function MapView() {
   } | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const res = await fetch("/spots.geojson");
-      const data = (await res.json()) as SpotFeatureCollection;
+  (async () => {
+    // 1) IndexedDBから読む
+    const saved = await getAllSpots();
 
-      setSpots(data.features ?? []);
-    })();
+    // 2) まだ空なら、初回だけGeoJSONを取り込む
+    if (saved.length === 0) {
+      const seeded = await isSeeded();
+      if (!seeded) {
+        const res = await fetch("/spots.geojson");
+        const geo = await res.json();
+        const initial = geojsonToSpots(geo);
+        await addSpotsBulk(initial);
+        await setSeeded(true);
+        setSpots(initial);
+        return;
+      }
+    }
+
+    setSpots(saved);
+  })();
   }, []);
+
 
   const allSpots = useMemo(() => spots, [spots]);
 
   const saveDraft = () => {
     if (!draft) return;
 
-  const newFeature: SpotFeature = {
-    type: "Feature",
-    properties: {
-      title: draft.title || "新規スポット",
-      memo: draft.memo,
-      category: draft.category as SpotCategory,
-      createdAt: new Date().toISOString(),
-    },
-    geometry: {
-      type: "Point",
-      coordinates: [draft.lng, draft.lat], // GeoJSONは [lng, lat]
-    },
-  };
+    const newFeature: Feature = {
+      type: "Feature",
+      properties: {
+        title: draft.title || "新規スポット",
+        memo: draft.memo,
+        category: draft.category,
+        createdAt: new Date().toISOString(),
+      },
+      geometry: {
+        type: "Point",
+        coordinates: [draft.lng, draft.lat], // GeoJSONは [lng, lat]
+      },
+    };
 
-  setSpots((prev) => [newFeature, ...prev]);
+    setSpots((prev) => [newFeature, ...prev]);
     setDraft(null);
   };
 
