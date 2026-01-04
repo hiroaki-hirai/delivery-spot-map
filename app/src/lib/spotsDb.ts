@@ -1,5 +1,5 @@
 import { openDB, type DBSchema } from "idb";
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection, Feature, Point } from "geojson";
 
 export type SpotCategory = "wait" | "shortcut" | "danger";
 
@@ -12,6 +12,25 @@ export type Spot = {
   lng: number;
   createdAt: string;
 };
+
+type SpotProps = {
+  title?: string;
+  memo?: string;
+  category?: "wait" | "shortcut" | "danger";
+  createdAt?: string;
+};
+
+type SpotFeature = Feature<Point, SpotProps>;
+type SpotFC = FeatureCollection<Point, SpotProps>;
+
+function isSpotFC(x: unknown): x is SpotFC {
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    (x as { type?: unknown }).type === "FeatureCollection" &&
+    Array.isArray((x as { features?: unknown }).features)
+  );
+}
 
 type Meta = {
   key: "seeded";
@@ -72,12 +91,13 @@ export async function setSeeded(value: boolean): Promise<void> {
 }
 
 // GeoJSON → Spot[] に変換（Pointのみ）
-export function geojsonToSpots(data: FeatureCollection): Spot[] {
-  const features = data.features ?? [];
-  return features
-    .filter((f: any) => f?.geometry?.type === "Point")
-    .map((f: any, i: number) => {
-      const [lng, lat] = f.geometry.coordinates as [number, number];
+export function geojsonToSpots(data: unknown): Spot[] {
+  if (!isSpotFC(data)) return [];
+
+  return data.features
+    .filter((f): f is SpotFeature => f.geometry?.type === "Point")
+    .map((f, i) => {
+      const [lng, lat] = f.geometry.coordinates;
       const p = f.properties ?? {};
       const createdAt = new Date().toISOString();
 
@@ -85,10 +105,10 @@ export function geojsonToSpots(data: FeatureCollection): Spot[] {
         id: crypto.randomUUID(),
         title: String(p.title ?? `Spot ${i + 1}`),
         memo: String(p.memo ?? ""),
-        category: (p.category as SpotCategory) ?? "wait",
+        category: (p.category ?? "wait") as SpotCategory,
         lat,
         lng,
-        createdAt,
+        createdAt: String(p.createdAt ?? createdAt),
       };
     });
 }
